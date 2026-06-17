@@ -1,0 +1,13 @@
+path: dataset_yolo
+
+train: images/train
+val: images/val
+
+
+names:
+  0: DuongNguoiDiBoCatNgang
+  1: TreEm
+  2: CongTruong
+  3: GiaoNhauVoiDuongUuTien
+  4: GiaoNhauCoTinHieuDen
+  5: DuongGiaoNhau

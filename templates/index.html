@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Nhận diện biển báo nguy hiểm</title>
+
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background: #f4f6f8;
+        margin: 0;
+        padding: 20px;
+      }
+
+      h1 {
+        text-align: center;
+        color: #222;
+      }
+
+      .panel {
+        background: white;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 0 8px #ccc;
+        margin-bottom: 20px;
+      }
+
+      .control {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        justify-content: center;
+        align-items: center;
+      }
+
+      .group {
+        border: 1px solid #ddd;
+        padding: 10px;
+        border-radius: 8px;
+        background: #fafafa;
+      }
+
+      .group-title {
+        font-weight: bold;
+        margin-bottom: 8px;
+        text-align: center;
+      }
+
+      button {
+        padding: 9px 14px;
+        margin: 3px;
+        border: none;
+        border-radius: 6px;
+        background: #1976d2;
+        color: white;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: #0d47a1;
+      }
+
+      .danger {
+        background: #d32f2f;
+      }
+
+      .danger:hover {
+        background: #9a0007;
+      }
+
+      .green {
+        background: #2e7d32;
+      }
+
+      .green:hover {
+        background: #1b5e20;
+      }
+
+      input {
+        margin: 5px;
+      }
+
+      .status {
+        text-align: center;
+        font-weight: bold;
+        color: green;
+        margin: 15px 0;
+      }
+
+      .container {
+        display: flex;
+        gap: 20px;
+        justify-content: center;
+      }
+
+      .box {
+        width: 50%;
+        background: white;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 0 8px #ccc;
+        text-align: center;
+        min-height: 360px;
+      }
+
+      img,
+      video {
+        max-width: 100%;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+      }
+
+      .history {
+        margin: 30px auto;
+        width: 98%;
+        background: white;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 0 8px #ccc;
+      }
+    </style>
+  </head>
+
+  <body>
+    <h1>Hệ thống nhận diện biển báo nguy hiểm</h1>
+
+    <div class="panel">
+      <div class="control">
+        <div class="group">
+          <div class="group-title">Điều khiển chung</div>
+          <button onclick="resetHistory()">Reset lịch sử</button>
+          <button class="danger" onclick="clearAll()">Xóa tất cả</button>
+        </div>
+
+        <div class="group">
+          <div class="group-title">Camera</div>
+          <button class="green" onclick="startCamera()">Kết nối Camera</button>
+          <button class="danger" onclick="stopCamera()">Ngắt Camera</button>
+        </div>
+
+        <div class="group">
+          <div class="group-title">Upload Ảnh</div>
+          <input type="file" id="imageInput" accept="image/*" />
+          <button onclick="uploadImage()">Bắt đầu nhận diện ảnh</button>
+          <button class="danger" onclick="clearImage()">Xóa ảnh</button>
+        </div>
+
+        <div class="group">
+          <div class="group-title">Upload Video</div>
+          <input type="file" id="videoInput" accept="video/*" />
+          <button onclick="uploadVideo()">Bắt đầu nhận diện video</button>
+          <button onclick="pauseVideo()">Tạm dừng / Tiếp tục</button>
+          <button class="danger" onclick="clearVideo()">Xóa video</button>
+        </div>
+
+        <div class="group">
+          <div class="group-title">Output</div>
+          <button onclick="downloadOutput()">Download Output</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="status" id="statusText">Chưa chọn nguồn đầu vào</div>
+
+    <div class="container">
+      <div class="box">
+        <h3>Input</h3>
+
+        <img id="inputImage" src="" style="display: none; width: 100%" />
+        <img id="inputStream" src="" style="display: none; width: 100%" />
+
+        <video
+          id="inputVideo"
+          muted
+          playsinline
+          controls
+          style="display: none; width: 100%"
+        ></video>
+
+        <p id="cameraText" style="display: none">
+          Camera máy tính đang hoạt động
+        </p>
+      </div>
+
+      <div class="box">
+        <h3>Output - AI nhận diện</h3>
+
+        <img id="outputImage" src="" style="display: none; width: 100%" />
+
+        <video
+          id="outputVideo"
+          controls
+          style="display: none; width: 100%"
+        ></video>
+      </div>
+    </div>
+
+    <div class="history">
+      <h3>Lịch sử nhận diện</h3>
+      <ul id="historyList"></ul>
+    </div>
+
+    <script>
+      let videoPaused = false;
+      let currentInputUrl = "";
+      let currentOutputUrl = "";
+      let currentVideoId = "";
+      let isPaused = false;
+
+      function hideAll() {
+        document.getElementById("inputImage").style.display = "none";
+        document.getElementById("inputStream").style.display = "none";
+        document.getElementById("inputVideo").style.display = "none";
+        document.getElementById("outputImage").style.display = "none";
+        document.getElementById("outputVideo").style.display = "none";
+        document.getElementById("cameraText").style.display = "none";
+      }
+
+      function clearAll() {
+        hideAll();
+
+        document.getElementById("inputImage").src = "";
+        document.getElementById("inputStream").src = "";
+        document.getElementById("inputVideo").src = "";
+        document.getElementById("outputImage").src = "";
+        document.getElementById("outputVideo").src = "";
+
+        document.getElementById("imageInput").value = "";
+        document.getElementById("videoInput").value = "";
+
+        document.getElementById("statusText").innerText =
+          "Đã xóa camera, ảnh và video";
+      }
+
+      function startCamera() {
+        hideAll();
+
+        document.getElementById("inputStream").style.display = "block";
+        document.getElementById("outputImage").style.display = "block";
+
+        document.getElementById("inputStream").src =
+          "/camera_raw?t=" + new Date().getTime();
+
+        document.getElementById("outputImage").src =
+          "/camera_detect?t=" + new Date().getTime();
+
+        document.getElementById("statusText").innerText =
+          "Đã kết nối camera máy tính";
+      }
+
+      function stopCamera() {
+        fetch("/stop_camera", {
+          method: "POST",
+        })
+          .then((res) => res.json())
+          .then((data) => {
+            document.getElementById("inputStream").src = "";
+            document.getElementById("outputImage").src = "";
+
+            document.getElementById("inputStream").style.display = "none";
+            document.getElementById("outputImage").style.display = "none";
+
+            document.getElementById("statusText").innerText = data.message;
+          });
+      }
+
+      function uploadImage() {
+        const file = document.getElementById("imageInput").files[0];
+
+        if (!file) {
+          alert("Vui lòng chọn ảnh");
+          return;
+        }
+
+        hideAll();
+
+        const formData = new FormData();
+        formData.append("image", file);
+
+        document.getElementById("inputImage").style.display = "block";
+        document.getElementById("inputImage").src = URL.createObjectURL(file);
+
+        document.getElementById("statusText").innerText =
+          "Đang nhận diện ảnh...";
+
+        fetch("/upload_image", {
+          method: "POST",
+          body: formData,
+        })
+          .then((res) => res.json())
+          .then((data) => {
+            document.getElementById("outputImage").style.display = "block";
+            document.getElementById("outputImage").src =
+              data.output + "?t=" + new Date().getTime();
+
+            document.getElementById("statusText").innerText =
+              "Đã nhận diện ảnh";
+
+            updateHistory();
+          });
+      }
+
+      function clearImage() {
+        document.getElementById("inputImage").src = "";
+        document.getElementById("outputImage").src = "";
+        document.getElementById("imageInput").value = "";
+
+        document.getElementById("inputImage").style.display = "none";
+        document.getElementById("outputImage").style.display = "none";
+
+        document.getElementById("statusText").innerText = "Đã xóa ảnh";
+      }
+
+      function uploadVideo() {
+        const file = document.getElementById("videoInput").files[0];
+
+        if (!file) {
+          alert("Vui lòng chọn video");
+          return;
+        }
+
+        hideAll();
+
+        const formData = new FormData();
+        formData.append("video", file);
+
+        const inputStream = document.getElementById("inputStream");
+        const outputImage = document.getElementById("outputImage");
+
+        document.getElementById("statusText").innerText =
+          "Đang upload video và nhận diện...";
+
+        fetch("/upload_video", {
+          method: "POST",
+          body: formData,
+        })
+          .then((res) => res.json())
+          .then((data) => {
+            currentVideoId = data.video_id;
+            isPaused = false;
+
+            inputStream.style.display = "block";
+            outputImage.style.display = "block";
+
+            currentInputUrl = data.input;
+            currentOutputUrl = data.output;
+
+            inputStream.src = currentInputUrl + "?t=" + new Date().getTime();
+
+            outputImage.src = currentOutputUrl + "?t=" + new Date().getTime();
+
+            videoPaused = false;
+
+            document.getElementById("statusText").innerText =
+              "Video input và output đang chạy";
+          })
+          .catch((error) => {
+            console.log(error);
+            alert("Lỗi xử lý video");
+          });
+      }
+
+function pauseVideo() {
+
+  if (!currentVideoId) {
+    alert("Chưa có video");
+    return;
+  }
+
+  if (!isPaused) {
+
+    fetch("/pause_video/" + currentVideoId, {
+      method: "POST"
+    })
+    .then(() => {
+
+      isPaused = true;
+
+      document.getElementById("statusText").innerText =
+        "Video đã tạm dừng";
+
+    });
+
+  } else {
+
+    fetch("/resume_video/" + currentVideoId, {
+      method: "POST"
+    })
+    .then(() => {
+
+      isPaused = false;
+
+      document.getElementById("statusText").innerText =
+        "Video tiếp tục chạy";
+
+    });
+
+  }
+}
+
+      function clearVideo() {
+        document.getElementById("inputStream").src = "";
+        document.getElementById("inputVideo").src = "";
+        document.getElementById("outputImage").src = "";
+        document.getElementById("outputVideo").src = "";
+        document.getElementById("videoInput").value = "";
+
+        document.getElementById("inputStream").style.display = "none";
+        document.getElementById("inputVideo").style.display = "none";
+        document.getElementById("outputImage").style.display = "none";
+        document.getElementById("outputVideo").style.display = "none";
+
+        document.getElementById("statusText").innerText = "Đã xóa video";
+      }
+
+      function updateHistory() {
+        fetch("/history")
+          .then((res) => res.json())
+          .then((data) => {
+            const list = document.getElementById("historyList");
+            list.innerHTML = "";
+
+            for (const key in data) {
+              const li = document.createElement("li");
+              li.innerText = key + ": " + data[key] + " lần";
+              list.appendChild(li);
+            }
+          });
+      }
+
+      function resetHistory() {
+        fetch("/reset", {
+          method: "POST",
+        })
+          .then((res) => res.json())
+          .then((data) => {
+            alert(data.message);
+            updateHistory();
+          });
+      }
+
+      function downloadOutput() {
+        window.location.href = "/download";
+      }
+
+      setInterval(updateHistory, 3000);
+    </script>
+  </body>
+</html>
