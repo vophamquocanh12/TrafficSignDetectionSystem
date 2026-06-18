@@ -254,9 +254,10 @@
         })
           .then((res) => res.json())
           .then((data) => {
+            hideAll();
             document.getElementById("inputStream").src = "";
             document.getElementById("outputImage").src = "";
-
+            
             document.getElementById("inputStream").style.display = "none";
             document.getElementById("outputImage").style.display = "none";
 

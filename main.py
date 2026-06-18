@@ -61,6 +61,26 @@ def start_camera_thread():
     thread = threading.Thread(target=update, daemon=True)
     thread.start()
 
+@app.route("/stop_camera", methods=["POST"])
+def stop_camera():
+
+    global camera
+    global camera_running
+    global latest_frame
+    global latest_detect_frame
+
+    camera_running = False
+
+    if camera:
+        camera.release()
+        camera = None
+
+    latest_frame = None
+    latest_detect_frame = None
+
+    return jsonify({
+        "message":"Camera đã ngắt"
+    })
 
 def get_latest_frame():
     with camera_lock:
