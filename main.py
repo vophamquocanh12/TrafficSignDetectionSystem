@@ -30,6 +30,7 @@ CLASS_NAMES = {
 }
 
 history_scan = defaultdict(int)
+detection_timeline = []
 last_detect_time = {}
 DETECT_COOLDOWN = 3  # Giới hạn thời gian giữa các lần phát hiện cùng loại (giây)
 latest_output = None
@@ -90,7 +91,7 @@ def get_latest_frame():
 
 
 def detect_frame(frame):
-    results = model.predict(frame, conf=0.5, verbose=False)
+    results = model.predict(frame, conf=0.45, imgsz=320, verbose=False)
     annotated = results[0].plot(
     conf=False,
     labels=True
@@ -103,6 +104,10 @@ def detect_frame(frame):
             current_time = time.time()
             if class_name not in last_detect_time:
                 history_scan[class_name] += 1
+                detection_timeline.append({
+                "time": time.strftime("%H:%M:%S"),
+                "class_name": class_name
+                })
                 last_detect_time[class_name] = current_time
 
             elif current_time - last_detect_time[class_name] > DETECT_COOLDOWN:
@@ -311,11 +316,23 @@ def resume_video(video_id):
 def history():
     return jsonify(dict(history_scan))
 
+@app.route("/chart_data")
+def chart_data():
+    return jsonify({
+        "counts": dict(history_scan),
+        "timeline": detection_timeline[-30:]
+    })
 
 @app.route("/reset", methods=["POST"])
 def reset():
     history_scan.clear()
-    return jsonify({"message": "Đã reset lịch sử"})
+    last_detect_time.clear()
+    detection_timeline.clear()
+
+    return jsonify({
+        "message": "Đã reset lịch sử"
+    })
+
 
 
 @app.route("/download")

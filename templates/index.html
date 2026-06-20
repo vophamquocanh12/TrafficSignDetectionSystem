@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <title>Nhận diện biển báo nguy hiểm</title>
 
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
     <style>
       body {
         font-family: Arial, sans-serif;
@@ -118,6 +120,22 @@
         border-radius: 10px;
         box-shadow: 0 0 8px #ccc;
       }
+
+      .chart-box {
+        width: 98%;
+        height: 360px;
+        margin: 25px auto;
+        background: white;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 0 8px #ccc;
+        overflow: hidden;
+      }
+
+      .chart-box canvas {
+        width: 100% !important;
+        height: 300px !important;
+      }
     </style>
   </head>
 
@@ -156,6 +174,7 @@
         <div class="group">
           <div class="group-title">Output</div>
           <button onclick="downloadOutput()">Download Output</button>
+          <button onclick="downloadChart()">Tải biểu đồ</button>
         </div>
       </div>
     </div>
@@ -195,9 +214,13 @@
       </div>
     </div>
 
-    <div class="history">
+    <!-- <div class="history">
       <h3>Lịch sử nhận diện</h3>
       <ul id="historyList"></ul>
+    </div> -->
+    <div class="chart-box">
+      <h3>Biểu đồ thống kê số lần nhận diện</h3>
+      <canvas id="countChart"></canvas>
     </div>
 
     <script>
@@ -206,6 +229,105 @@
       let currentOutputUrl = "";
       let currentVideoId = "";
       let isPaused = false;
+      let currentMode = "none"; /*none camera image video*/
+
+      let countChart = null;
+
+      function updateChart() {
+        fetch("/chart_data")
+          .then((res) => res.json())
+          .then((data) => {
+            const allLabels = [
+              "Đường người đi bộ cắt ngang",
+              "Trẻ em",
+              "Công trường",
+              "Giao nhau với đường ưu tiên",
+              "Giao nhau có tín hiệu đèn",
+              "Đường giao nhau",
+            ];
+
+            const labelColors = {
+              "Đường người đi bộ cắt ngang": "#4CAF50",
+              "Trẻ em": "#FF9800",
+              "Công trường": "#F44336",
+              "Giao nhau với đường ưu tiên": "#2196F3",
+              "Giao nhau có tín hiệu đèn": "#9C27B0",
+              "Đường giao nhau": "#795548",
+            };
+
+            const labels = allLabels;
+            const values = allLabels.map((label) => data.counts[label] || 0);
+            const colors = allLabels.map((label) => labelColors[label]);
+
+            const maxValue = Math.max(...values, 5);
+            const suggestedMax = Math.ceil(maxValue + 2);
+
+            if (!countChart) {
+              const ctx = document
+                .getElementById("countChart")
+                .getContext("2d");
+
+              countChart = new Chart(ctx, {
+                type: "bar",
+                data: {
+                  labels: labels,
+                  datasets: [
+                    {
+                      label: "Số lần nhận diện",
+                      data: values,
+                      backgroundColor: colors,
+                      borderColor: colors,
+                      borderWidth: 1,
+                    },
+                  ],
+                },
+                options: {
+                  indexAxis: "y",
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  animation: false,
+                  plugins: {
+                    legend: {
+                      display: false,
+                    },
+                    tooltip: {
+                      callbacks: {
+                        title: function (context) {
+                          return context[0].label;
+                        },
+                        label: function (context) {
+                          return "Số lần xuất hiện: " + context.parsed.x;
+                        },
+                      },
+                    },
+                  },
+                  scales: {
+                    x: {
+                      beginAtZero: true,
+                      suggestedMax: suggestedMax,
+                      ticks: {
+                        stepSize: 1,
+                      },
+                    },
+                    y: {
+                      ticks: {
+                        autoSkip: false,
+                      },
+                    },
+                  },
+                },
+              });
+            } else {
+              countChart.data.labels = labels;
+              countChart.data.datasets[0].data = values;
+              countChart.data.datasets[0].backgroundColor = colors;
+              countChart.data.datasets[0].borderColor = colors;
+              countChart.options.scales.x.suggestedMax = suggestedMax;
+              countChart.update();
+            }
+          });
+      }
+      setInterval(updateChart, 2000);
 
       function hideAll() {
         document.getElementById("inputImage").style.display = "none";
@@ -233,6 +355,17 @@
       }
 
       function startCamera() {
+        if (currentMode === "image") {
+          alert("Vui lòng xóa ảnh trước khi bật camera");
+          return;
+        }
+
+        if (currentMode === "video") {
+          alert("Vui lòng xóa video trước khi bật camera");
+          return;
+        }
+
+        currentMode = "camera";
         hideAll();
 
         document.getElementById("inputStream").style.display = "block";
@@ -254,10 +387,11 @@
         })
           .then((res) => res.json())
           .then((data) => {
+            currentMode = "none";
             hideAll();
             document.getElementById("inputStream").src = "";
             document.getElementById("outputImage").src = "";
-            
+
             document.getElementById("inputStream").style.display = "none";
             document.getElementById("outputImage").style.display = "none";
 
@@ -266,6 +400,17 @@
       }
 
       function uploadImage() {
+        if (currentMode === "camera") {
+          alert("Vui lòng ngắt camera trước khi upload ảnh");
+          return;
+        }
+
+        if (currentMode === "video") {
+          alert("Vui lòng xóa video trước khi upload ảnh");
+          return;
+        }
+
+        currentMode = "image";
         const file = document.getElementById("imageInput").files[0];
 
         if (!file) {
@@ -308,11 +453,22 @@
 
         document.getElementById("inputImage").style.display = "none";
         document.getElementById("outputImage").style.display = "none";
-
+        currentMode = "none";
         document.getElementById("statusText").innerText = "Đã xóa ảnh";
       }
 
       function uploadVideo() {
+        if (currentMode === "camera") {
+          alert("Vui lòng ngắt camera trước khi upload video");
+          return;
+        }
+
+        if (currentMode === "image") {
+          alert("Vui lòng xóa ảnh trước khi upload video");
+          return;
+        }
+
+        currentMode = "video";
         const file = document.getElementById("videoInput").files[0];
 
         if (!file) {
@@ -361,43 +517,32 @@
           });
       }
 
-function pauseVideo() {
+      function pauseVideo() {
+        if (!currentVideoId) {
+          alert("Chưa có video");
+          return;
+        }
 
-  if (!currentVideoId) {
-    alert("Chưa có video");
-    return;
-  }
+        if (!isPaused) {
+          fetch("/pause_video/" + currentVideoId, {
+            method: "POST",
+          }).then(() => {
+            isPaused = true;
 
-  if (!isPaused) {
+            document.getElementById("statusText").innerText =
+              "Video đã tạm dừng";
+          });
+        } else {
+          fetch("/resume_video/" + currentVideoId, {
+            method: "POST",
+          }).then(() => {
+            isPaused = false;
 
-    fetch("/pause_video/" + currentVideoId, {
-      method: "POST"
-    })
-    .then(() => {
-
-      isPaused = true;
-
-      document.getElementById("statusText").innerText =
-        "Video đã tạm dừng";
-
-    });
-
-  } else {
-
-    fetch("/resume_video/" + currentVideoId, {
-      method: "POST"
-    })
-    .then(() => {
-
-      isPaused = false;
-
-      document.getElementById("statusText").innerText =
-        "Video tiếp tục chạy";
-
-    });
-
-  }
-}
+            document.getElementById("statusText").innerText =
+              "Video tiếp tục chạy";
+          });
+        }
+      }
 
       function clearVideo() {
         document.getElementById("inputStream").src = "";
@@ -410,7 +555,7 @@ function pauseVideo() {
         document.getElementById("inputVideo").style.display = "none";
         document.getElementById("outputImage").style.display = "none";
         document.getElementById("outputVideo").style.display = "none";
-
+        currentMode = "none";
         document.getElementById("statusText").innerText = "Đã xóa video";
       }
 
@@ -430,18 +575,57 @@ function pauseVideo() {
       }
 
       function resetHistory() {
+        const confirmReset = confirm(
+          "Bạn có chắc chắn muốn reset lịch sử và biểu đồ không?",
+        );
+
+        if (!confirmReset) {
+          return;
+        }
+
         fetch("/reset", {
           method: "POST",
         })
           .then((res) => res.json())
           .then((data) => {
+            document.getElementById("historyList").innerHTML = "";
+
+            if (countChart) {
+              countChart.data.labels = [];
+              countChart.data.datasets[0].data = [];
+              countChart.update();
+            }
+
             alert(data.message);
-            updateHistory();
           });
       }
 
       function downloadOutput() {
         window.location.href = "/download";
+      }
+
+      function downloadChart() {
+        if (!countChart) {
+          alert("Chưa có biểu đồ để tải");
+          return;
+        }
+
+        const canvas = document.getElementById("countChart");
+
+        const tempCanvas = document.createElement("canvas");
+        const ctx = tempCanvas.getContext("2d");
+
+        tempCanvas.width = canvas.width;
+        tempCanvas.height = canvas.height;
+
+        ctx.fillStyle = "white";
+        ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+        ctx.drawImage(canvas, 0, 0);
+
+        const link = document.createElement("a");
+        link.href = tempCanvas.toDataURL("image/png");
+        link.download = "bieu_do_thong_ke_bien_bao.png";
+        link.click();
       }
 
       setInterval(updateHistory, 3000);
