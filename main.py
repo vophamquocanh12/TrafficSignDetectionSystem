@@ -5,6 +5,9 @@ import cv2
 import os
 import time
 import threading
+import tempfile
+import numpy as np
+from io import BytesIO
 
 app = Flask(__name__)
 
@@ -40,6 +43,11 @@ latest_frame = None
 camera_lock = threading.Lock()
 camera_running = False
 
+latest_output_data = None
+latest_output_name = None
+latest_output_type = None
+latest_video_input_path = None
+video_temp_paths = {}
 
 def start_camera_thread():
     global camera, latest_frame, camera_running
@@ -183,30 +191,48 @@ def camera_detect():
 
 @app.route("/upload_image", methods=["POST"])
 def upload_image():
-    global latest_output
+    global latest_output_data, latest_output_name, latest_output_type
 
     file = request.files["image"]
-    timestamp = int(time.time())
 
-    input_path = os.path.join(UPLOAD_FOLDER, f"input_{timestamp}.jpg")
-    output_path = os.path.join(OUTPUT_FOLDER, f"output_{timestamp}.jpg")
+    file_bytes = file.read()
+    np_arr = np.frombuffer(file_bytes, np.uint8)
+    frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
-    file.save(input_path)
-
-    frame = cv2.imread(input_path)
     output = detect_frame(frame)
 
-    cv2.imwrite(output_path, output)
-    latest_output = output_path
+    success, buffer = cv2.imencode(".jpg", output)
+
+    if not success:
+        return jsonify({"error": "Không xử lý được ảnh"}), 400
+
+    latest_output_data = buffer.tobytes()
+    latest_output_name = "output_detect_image.jpg"
+    latest_output_type = "image"
+
+    input_base64 = "data:image/jpeg;base64,"
+    output_path = "/preview_output_image"
 
     return jsonify({
-        "input": "/" + input_path.replace("\\", "/"),
-        "output": "/" + output_path.replace("\\", "/")
+        "output": output_path
     })
+
+@app.route("/preview_output_image")
+def preview_output_image():
+    if latest_output_data is None:
+        return "No image", 404
+
+    return Response(
+        latest_output_data,
+        mimetype="image/jpeg"
+    )
 
 @app.route("/video_raw_stream/<filename>")
 def video_raw_stream(filename):
-    video_path = os.path.join(UPLOAD_FOLDER, filename)
+    video_path = video_temp_paths.get(filename)
+
+    if video_path is None:
+        return "Không tìm thấy video tạm", 404
 
     def generate():
         cap = cv2.VideoCapture(video_path)
@@ -243,11 +269,24 @@ def upload_video():
     file = request.files["video"]
     timestamp = int(time.time())
 
-    input_path = os.path.join(UPLOAD_FOLDER, f"input_{timestamp}.mp4")
-    file.save(input_path)
+    global latest_video_input_path, latest_output_type
+
+    temp_file = tempfile.NamedTemporaryFile(
+        delete=False,
+        suffix=".mp4"
+    )
+
+    file.save(temp_file.name)
+    temp_file.close()
+
+    input_path = temp_file.name
+
+    latest_video_input_path = input_path
+    latest_output_type = "video"
 
     filename = f"input_{timestamp}.mp4"
     video_pause[filename] = False
+    video_temp_paths[filename] = input_path
 
     return jsonify({
     "video_id": filename,
@@ -258,7 +297,10 @@ def upload_video():
 
 @app.route("/video_detect_stream/<filename>")
 def video_detect_stream(filename):
-    video_path = os.path.join(UPLOAD_FOLDER, filename)
+    video_path = video_temp_paths.get(filename)
+
+    if video_path is None:
+        return "Không tìm thấy video tạm"
 
     def generate():
         cap = cv2.VideoCapture(video_path)
@@ -337,11 +379,70 @@ def reset():
 
 @app.route("/download")
 def download():
-    if latest_output and os.path.exists(latest_output):
-        return send_file(latest_output, as_attachment=True)
+    global latest_output_data
+    global latest_output_name
+    global latest_output_type
+    global latest_video_input_path
 
-    return jsonify({"error": "Chưa có file output"}), 404
+    if latest_output_type == "image":
+        if latest_output_data is None:
+            return jsonify({"error": "Chưa có ảnh output"}), 404
 
+        return send_file(
+            BytesIO(latest_output_data),
+            mimetype="image/jpeg",
+            as_attachment=True,
+            download_name="output_detect_image.jpg"
+        )
+
+    if latest_output_type == "video":
+        if latest_video_input_path is None:
+            return jsonify({"error": "Chưa có video output"}), 404
+
+        temp_output = tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=".mp4"
+        )
+
+        output_path = temp_output.name
+        temp_output.close()
+
+        cap = cv2.VideoCapture(latest_video_input_path)
+
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps <= 0:
+            fps = 25
+
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        writer = cv2.VideoWriter(
+            output_path,
+            cv2.VideoWriter_fourcc(*"mp4v"),
+            fps,
+            (width, height)
+        )
+
+        while True:
+            success, frame = cap.read()
+
+            if not success:
+                break
+
+            output = detect_frame(frame)
+            writer.write(output)
+
+        cap.release()
+        writer.release()
+
+        return send_file(
+            output_path,
+            mimetype="video/mp4",
+            as_attachment=True,
+            download_name="output_detect_video.mp4"
+        )
+
+    return jsonify({"error": "Chưa có output để tải"}), 404
 
 if __name__ == "__main__":
     app.run(
