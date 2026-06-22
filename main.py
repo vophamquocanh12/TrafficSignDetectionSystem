@@ -48,6 +48,18 @@ latest_output_name = None
 latest_output_type = None
 latest_video_input_path = None
 video_temp_paths = {}
+current_video = {
+    "raw_frame": None,
+    "detect_frame": None,
+    "running": False,
+    "paused": False,
+    "finished": False,
+    "session": 0
+}
+
+current_video_lock = threading.Lock()
+video_session_id = 0
+
 
 def start_camera_thread():
     global camera, latest_frame, camera_running
@@ -97,7 +109,6 @@ def get_latest_frame():
             return None
         return latest_frame.copy()
 
-
 def detect_frame(frame):
     results = model.predict(frame, conf=0.45, imgsz=320, verbose=False)
     annotated = results[0].plot(
@@ -124,18 +135,15 @@ def detect_frame(frame):
 
     return annotated
 
-
 def encode_jpg(frame):
     ret, buffer = cv2.imencode(".jpg", frame)
     if not ret:
         return None
     return buffer.tobytes()
 
-
 @app.route("/")
 def home():
     return render_template("index.html")
-
 
 @app.route("/camera_raw")
 def camera_raw():
@@ -160,7 +168,6 @@ def camera_raw():
             )
 
     return Response(generate(), mimetype="multipart/x-mixed-replace; boundary=frame")
-
 
 @app.route("/camera_detect")
 def camera_detect():
@@ -187,7 +194,6 @@ def camera_detect():
             )
 
     return Response(generate(), mimetype="multipart/x-mixed-replace; boundary=frame")
-
 
 @app.route("/upload_image", methods=["POST"])
 def upload_image():
@@ -227,49 +233,16 @@ def preview_output_image():
         mimetype="image/jpeg"
     )
 
-@app.route("/video_raw_stream/<filename>")
-def video_raw_stream(filename):
-    video_path = video_temp_paths.get(filename)
-
-    if video_path is None:
-        return "Không tìm thấy video tạm", 404
-
-    def generate():
-        cap = cv2.VideoCapture(video_path)
-
-        while True:
-            while video_pause.get(filename, False):
-                time.sleep(0.1)
-            success, frame = cap.read()
-            
-            if not success:
-                break
-            time.sleep(0.1)  # Giảm tốc độ stream để tránh quá tải
-            frame_bytes = encode_jpg(frame)
-
-            if frame_bytes is None:
-                continue
-
-            yield (
-                b"--frame\r\n"
-                b"Content-Type: image/jpeg\r\n\r\n" +
-                frame_bytes +
-                b"\r\n"
-            )
-
-        cap.release()
-
-    return Response(
-        generate(),
-        mimetype="multipart/x-mixed-replace; boundary=frame"
-    )
-
 @app.route("/upload_video", methods=["POST"])
 def upload_video():
-    file = request.files["video"]
-    timestamp = int(time.time())
+    global latest_video_input_path
+    global latest_output_type
+    global video_session_id
 
-    global latest_video_input_path, latest_output_type
+    file = request.files["video"]
+
+    video_session_id += 1
+    my_session = video_session_id
 
     temp_file = tempfile.NamedTemporaryFile(
         delete=False,
@@ -284,38 +257,107 @@ def upload_video():
     latest_video_input_path = input_path
     latest_output_type = "video"
 
-    filename = f"input_{timestamp}.mp4"
-    video_pause[filename] = False
-    video_temp_paths[filename] = input_path
+    with current_video_lock:
+        current_video["raw_frame"] = None
+        current_video["detect_frame"] = None
+        current_video["running"] = True
+        current_video["paused"] = False
+        current_video["finished"] = False
+        current_video["session"] = my_session
 
-    return jsonify({
-    "video_id": filename,
-    "input": f"/video_raw_stream/{filename}",
-    "output": f"/video_detect_stream/{filename}"
-    })
+    def process_video():
+        cap = cv2.VideoCapture(input_path)
 
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps <= 0:
+            fps = 25
 
-@app.route("/video_detect_stream/<filename>")
-def video_detect_stream(filename):
-    video_path = video_temp_paths.get(filename)
-
-    if video_path is None:
-        return "Không tìm thấy video tạm"
-
-    def generate():
-        cap = cv2.VideoCapture(video_path)
+        delay = 1 / fps
+        frame_count = 0
+        last_detect = None
 
         while True:
-            while video_pause.get(filename, False):
-                time.sleep(0.1)
+            start_time = time.time()
+
+            with current_video_lock:
+                if current_video["session"] != my_session:
+                    break
+
+                if not current_video["running"]:
+                    break
+
+                paused = current_video["paused"]
+
+            if paused:
+                time.sleep(0.05)
+                continue
+
             success, frame = cap.read()
 
             if not success:
                 break
 
-            output = detect_frame(frame)
+            frame_count += 1
+            raw_frame = frame.copy()
 
-            frame_bytes = encode_jpg(output)
+            if frame_count % 4 == 0 or last_detect is None:
+                last_detect = detect_frame(frame.copy())
+
+            with current_video_lock:
+                if current_video["session"] != my_session:
+                    break
+
+                current_video["raw_frame"] = raw_frame
+                current_video["detect_frame"] = last_detect.copy()
+
+            elapsed = time.time() - start_time
+            sleep_time = max(0, delay - elapsed)
+
+            time.sleep(sleep_time)
+
+        cap.release()
+
+        with current_video_lock:
+            if current_video["session"] == my_session:
+                current_video["running"] = False
+                current_video["finished"] = True
+
+    thread = threading.Thread(
+        target=process_video,
+        daemon=True
+    )
+
+    thread.start()
+
+    return jsonify({
+    "video_id": str(my_session),
+    "input": "/video_raw_stream?sid=" + str(my_session),
+    "output": "/video_detect_stream?sid=" + str(my_session)
+    })
+
+@app.route("/video_raw_stream")
+def video_raw_stream():
+    sid = request.args.get("sid")
+
+    def generate():
+        while True:
+            with current_video_lock:
+                current_session = str(current_video.get("session"))
+
+                if current_session != str(sid):
+                    time.sleep(0.01)
+                    continue
+
+                frame = current_video["raw_frame"]
+                finished = current_video["finished"]
+
+            if frame is None:
+                if finished:
+                    break
+                time.sleep(0.01)
+                continue
+
+            frame_bytes = encode_jpg(frame)
 
             if frame_bytes is None:
                 continue
@@ -327,32 +369,69 @@ def video_detect_stream(filename):
                 b"\r\n"
             )
 
-        cap.release()
+    return Response(
+        generate(),
+        mimetype="multipart/x-mixed-replace; boundary=frame"
+    )
+
+@app.route("/video_detect_stream")
+def video_detect_stream():
+    sid = request.args.get("sid")
+
+    def generate():
+        while True:
+            with current_video_lock:
+                current_session = str(current_video.get("session"))
+
+                if current_session != str(sid):
+                    time.sleep(0.01)
+                    continue
+
+                frame = current_video["detect_frame"]
+                finished = current_video["finished"]
+
+            if frame is None:
+                if finished:
+                    break
+                time.sleep(0.01)
+                continue
+
+            frame_bytes = encode_jpg(frame)
+
+            if frame_bytes is None:
+                continue
+
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n" +
+                frame_bytes +
+                b"\r\n"
+            )
 
     return Response(
         generate(),
         mimetype="multipart/x-mixed-replace; boundary=frame"
     )
 
-@app.route("/pause_video/<video_id>", methods=["POST"])
-def pause_video(video_id):
-
-    if video_id in video_pause:
-        video_pause[video_id] = True
+@app.route("/pause_video", methods=["POST"])
+def pause_video():
+    with current_video_lock:
+        current_video["paused"] = True
 
     return jsonify({
         "message": "Video đã tạm dừng"
     })
 
-@app.route("/resume_video/<video_id>", methods=["POST"])
-def resume_video(video_id):
-
-    if video_id in video_pause:
-        video_pause[video_id] = False
+@app.route("/resume_video", methods=["POST"])
+def resume_video():
+    with current_video_lock:
+        current_video["paused"] = False
 
     return jsonify({
-        "message": "Video tiếp tục"
+        "message": "Video tiếp tục chạy"
     })
+
+    return jsonify({"message": "Video tiếp tục"})
 
 @app.route("/history")
 def history():
@@ -374,8 +453,6 @@ def reset():
     return jsonify({
         "message": "Đã reset lịch sử"
     })
-
-
 
 @app.route("/download")
 def download():

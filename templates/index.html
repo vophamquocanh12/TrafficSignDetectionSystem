@@ -502,11 +502,8 @@
             currentInputUrl = data.input;
             currentOutputUrl = data.output;
 
-            inputStream.src = currentInputUrl + "?t=" + new Date().getTime();
-
-            outputImage.src = currentOutputUrl + "?t=" + new Date().getTime();
-
-            videoPaused = false;
+            inputStream.src = currentInputUrl + "&t=" + new Date().getTime();
+            outputImage.src = currentOutputUrl + "&t=" + new Date().getTime();
 
             document.getElementById("statusText").innerText =
               "Video input và output đang chạy";
@@ -524,20 +521,18 @@
         }
 
         if (!isPaused) {
-          fetch("/pause_video/" + currentVideoId, {
+          fetch("/pause_video", {
             method: "POST",
           }).then(() => {
             isPaused = true;
-
             document.getElementById("statusText").innerText =
               "Video đã tạm dừng";
           });
         } else {
-          fetch("/resume_video/" + currentVideoId, {
+          fetch("/resume_video", {
             method: "POST",
           }).then(() => {
             isPaused = false;
-
             document.getElementById("statusText").innerText =
               "Video tiếp tục chạy";
           });
