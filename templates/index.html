@@ -233,6 +233,83 @@
 
       let countChart = null;
 
+      const soundMap = {
+        "Đường người đi bộ cắt ngang": "/static/sound/nguoidibo.mp3",
+        "Trẻ em": "/static/sound/treem.mp3",
+        "Công trường": "/static/sound/congtruong.mp3",
+        "Giao nhau với đường ưu tiên": "/static/sound/duonguutien.mp3",
+        "Giao nhau có tín hiệu đèn": "/static/sound/tinhieuden.mp3",
+        "Đường giao nhau": "/static/sound/giaonhau.mp3",
+      };
+
+      let audioQueue = [];
+      let isPlayingAudio = false;
+      let lastPlayedSound = {};
+      let soundCooldown = 4000;
+
+      function addSoundToQueue(sign) {
+        if (!soundMap[sign]) {
+          console.log("Không có file âm thanh:", sign);
+          return;
+        }
+
+        const now = Date.now();
+
+        if (
+          lastPlayedSound[sign] &&
+          now - lastPlayedSound[sign] < soundCooldown
+        ) {
+          return;
+        }
+
+        lastPlayedSound[sign] = now;
+        audioQueue.push(sign);
+        playNextSound();
+      }
+
+      function playNextSound() {
+        if (isPlayingAudio || audioQueue.length === 0) {
+          return;
+        }
+
+        isPlayingAudio = true;
+
+        const sign = audioQueue.shift();
+        const audio = new Audio(soundMap[sign]);
+
+        audio.onended = function () {
+          isPlayingAudio = false;
+          setTimeout(playNextSound, 300);
+        };
+
+        audio.onerror = function () {
+          console.log("Lỗi phát âm thanh:", sign);
+          isPlayingAudio = false;
+          setTimeout(playNextSound, 300);
+        };
+
+        audio.play().catch(function (error) {
+          console.log("Trình duyệt chặn âm thanh:", error);
+          isPlayingAudio = false;
+        });
+      }
+
+      function checkSoundEvents() {
+        fetch("/sound_events")
+          .then((res) => res.json())
+          .then((data) => {
+            if (!data.events || data.events.length === 0) {
+              return;
+            }
+
+            data.events.forEach((sign) => {
+              addSoundToQueue(sign);
+            });
+          });
+      }
+
+      setInterval(checkSoundEvents, 1000);
+
       function updateChart() {
         fetch("/chart_data")
           .then((res) => res.json())
@@ -327,6 +404,7 @@
             }
           });
       }
+
       setInterval(updateChart, 2000);
 
       function hideAll() {

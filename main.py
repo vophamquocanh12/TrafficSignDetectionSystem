@@ -60,6 +60,9 @@ current_video = {
 current_video_lock = threading.Lock()
 video_session_id = 0
 
+latest_detected_sign = None
+sound_events = []
+sound_lock = threading.Lock()
 
 def start_camera_thread():
     global camera, latest_frame, camera_running
@@ -110,27 +113,45 @@ def get_latest_frame():
         return latest_frame.copy()
 
 def detect_frame(frame):
-    results = model.predict(frame, conf=0.45, imgsz=320, verbose=False)
+    results = model.predict(
+        frame,
+        conf=0.45,
+        imgsz=320,
+        verbose=False
+    )
+
     annotated = results[0].plot(
-    conf=False,
-    labels=True
-)
+        conf=False,
+        labels=True
+    )
 
     if results[0].boxes is not None:
         for box in results[0].boxes:
             class_id = int(box.cls[0])
             class_name = CLASS_NAMES.get(class_id, "Unknown")
+
             current_time = time.time()
+
             if class_name not in last_detect_time:
                 history_scan[class_name] += 1
+                add_sound_event(class_name)
+
                 detection_timeline.append({
-                "time": time.strftime("%H:%M:%S"),
-                "class_name": class_name
+                    "time": time.strftime("%H:%M:%S"),
+                    "class_name": class_name
                 })
+
                 last_detect_time[class_name] = current_time
 
             elif current_time - last_detect_time[class_name] > DETECT_COOLDOWN:
                 history_scan[class_name] += 1
+                add_sound_event(class_name)
+
+                detection_timeline.append({
+                    "time": time.strftime("%H:%M:%S"),
+                    "class_name": class_name
+                })
+
                 last_detect_time[class_name] = current_time
 
     return annotated
@@ -140,6 +161,21 @@ def encode_jpg(frame):
     if not ret:
         return None
     return buffer.tobytes()
+
+def add_sound_event(class_name):
+    with sound_lock:
+        if class_name not in sound_events:
+            sound_events.append(class_name)
+
+@app.route("/sound_events")
+def get_sound_events():
+    with sound_lock:
+        events = sound_events.copy()
+        sound_events.clear()
+
+    return jsonify({
+        "events": events
+    })
 
 @app.route("/")
 def home():
@@ -433,6 +469,7 @@ def resume_video():
 
     return jsonify({"message": "Video tiếp tục"})
 
+
 @app.route("/history")
 def history():
     return jsonify(dict(history_scan))
@@ -449,6 +486,9 @@ def reset():
     history_scan.clear()
     last_detect_time.clear()
     detection_timeline.clear()
+
+    with sound_lock:
+        sound_events.clear()
 
     return jsonify({
         "message": "Đã reset lịch sử"
