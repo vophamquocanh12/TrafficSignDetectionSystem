@@ -14,8 +14,8 @@ function updateChart() {
       ];
 
       const labelColors = {
-        "Đường người đi bộ cắt ngang": "#2eb432",
-        "Trẻ em": "#ff9800",
+        "Đường người đi bộ cắt ngang": "#0cc112",
+        "Trẻ em": "#f500f5",
         "Công trường": "#ff1d0d",
         "Giao nhau với đường ưu tiên": "#2196f3",
         "Giao nhau có tín hiệu đèn": "#9c27b0",
