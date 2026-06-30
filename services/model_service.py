@@ -110,7 +110,9 @@ def update_detection(class_name, current_time):
 
     state.detection_timeline.append({
         "time": time.strftime("%H:%M:%S"),
-        "class_name": class_name
+        "class_name": class_name,
+        "date": time.strftime("%d-%m-%Y"),
+        "datetime": time.strftime("%d-%m-%Y %H:%M:%S")
     })
 
     add_sound_event(class_name)

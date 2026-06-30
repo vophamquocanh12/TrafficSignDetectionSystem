@@ -1,9 +1,12 @@
 let countChart = null;
+let latestTimeline = [];
 
 function updateChart() {
   fetch("/chart_data")
     .then((res) => res.json())
     .then((data) => {
+      latestTimeline = data.timeline || [];
+
       const allLabels = [
         "Đường người đi bộ cắt ngang",
         "Trẻ em",
@@ -51,32 +54,48 @@ function updateChart() {
             responsive: true,
             maintainAspectRatio: false,
             animation: false,
+
+            interaction: {
+              mode: "nearest",
+              intersect: true,
+            },
+
+            hover: {
+              mode: "nearest",
+              intersect: true,
+            },
+
             plugins: {
               legend: {
                 display: false,
               },
               tooltip: {
+                enabled: true,
+                mode: "nearest",
+                intersect: true,
                 callbacks: {
                   title: function (context) {
                     return context[0].label;
                   },
                   label: function (context) {
-                    return "Số lần xuất hiện: " + context.parsed.x;
+                    const label = context.label;
+                    const count = context.parsed.x;
+
+                    const items = latestTimeline.filter(
+                      (item) => item.class_name === label,
+                    );
+
+                    const result = [
+                      "Tổng số lần: " + count,
+                      "Các lần nhận diện:",
+                    ];
+
+                    items.slice(-10).forEach((item, index) => {
+                      result.push("Lần " + (index + 1) + ": " + item.datetime);
+                    });
+
+                    return result;
                   },
-                },
-              },
-            },
-            scales: {
-              x: {
-                beginAtZero: true,
-                suggestedMax: suggestedMax,
-                ticks: {
-                  stepSize: 1,
-                },
-              },
-              y: {
-                ticks: {
-                  autoSkip: false,
                 },
               },
             },
